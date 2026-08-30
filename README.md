@@ -51,8 +51,19 @@ primary-image PNG
 ```bash
 uv sync --dev
 uv run pytest -q
-uv run modal deploy -m modal_2d.app
+./scripts/deploy-all.sh
 ```
+
+`deploy-all.sh` 会先逐个检查并预取模型权重；任一下载失败时立即终止，不会继续部署
+worker。通过 `modal-gen-client` 发起部署时也执行同样的检查、下载和二次校验。公开的
+SANA-Sprint 不强制要求 Token；统一部署其他需要授权的 Hugging Face 模型时，必须先配置
+Modal `main` 环境中的 `huggingface` Secret，并提供 `HF_TOKEN`。
+
+## 验收记录
+
+2026-08-31：本地 `30 passed`，约 9 秒；Ruff 全部通过。真实 Modal 空权重 Volume
+自动下载并校验后部署 SANA Worker，约 2 分 45 秒；随后真实 prompt 生成
+`1024×1024 image/png`，约 10 秒。
 
 `modal-sana` 仅作为已验证的 SANA-Sprint / diffusers / L40S 运行参考；本仓没有继承它的 Web、ledger、SQLModel 或 batch scheduler。这里的 batch 只是一个深 Provider capability：同一 worker 对多个 seed 顺序推理。
 
@@ -78,3 +89,46 @@ seed 135   2.428 s
 ```
 
 Warm batch 返回 `worker_reused=true`、`worker_load_ms=null`；cold batch 单独记录本次 `worker_load_ms`。这样外层 Job wait 不再被误解为模型推理时间。
+
+## Unified benchmark harness
+
+`scripts/benchmark.py` benchmarks the deployed production workers through the same capability-driven route used by clients. It does not duplicate model loading or inference code.
+
+Default run benchmarks every advertised model with warm batch sizes `1,2,4,8`:
+
+```bash
+uv run python scripts/benchmark.py --output benchmark-results/all.json
+```
+
+Select one or more models when a full run would be too expensive:
+
+```bash
+uv run python scripts/benchmark.py \
+  --model sana-sprint-1.6b \
+  --model z-image-turbo \
+  --batches 1,2,4,8 \
+  --output benchmark-results/fast-models.json
+```
+
+Each model gets one initial batch-1 cold probe followed by the requested warm runs. `coldStartObserved` is only `true` when the Worker itself reports a real model load; an already-warm container is never reported as a cold start.
+
+The report includes:
+
+- end-to-end latency and latency per image;
+- Worker model-load and batch timing;
+- per-image inference timing;
+- CUDA GPU name and peak allocated/reserved VRAM;
+- artifact count and byte sizes;
+- GPU-seconds consumed by the observed load/inference window;
+- optional cost estimates when an explicit current GPU hourly rate is supplied.
+
+GPU prices are deliberately not hard-coded. Supply them at run time if cost estimates are needed:
+
+```bash
+uv run python scripts/benchmark.py \
+  --model qwen-image-2512 \
+  --gpu-rate 'RTX-PRO-6000=YOUR_CURRENT_USD_PER_HOUR' \
+  --output benchmark-results/qwen.json
+```
+
+`benchmark-results/` is intended as ephemeral output; keep benchmark reports outside commits unless a specific result is being documented as an experiment.

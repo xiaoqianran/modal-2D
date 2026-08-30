@@ -28,6 +28,13 @@ def test_model_recipes_are_explicit_and_stable():
     assert model_spec("z-image-turbo").guidance_editable is False
     assert model_spec("hidream-o1-image").steps == 50
     assert model_spec("hidream-o1-image").guidance == 5.0
+    assert model_spec("qwen-image-2512").gpu == "RTX-PRO-6000"
+    assert model_spec("hidream-o1-image").gpu == "RTX-PRO-6000"
+    assert all(
+        model.gpu == "L40S"
+        for model in MODELS
+        if model.id not in {"qwen-image-2512", "hidream-o1-image"}
+    )
 
 
 def test_request_normalization_uses_model_recipe():
@@ -78,7 +85,7 @@ def test_capability_routes_every_model_to_its_worker():
     assert doc["operation"] == OPERATION
     assert doc["outputs"] == [{"role": "primary-image", "mediaType": ARTIFACT_MIME}]
     generation = doc["generation"]
-    assert generation["control_app"] == "modal-2d"
+    assert generation["entrypoint"] == "direct_class_method"
     assert generation["job_transport"] == "modal.FunctionCall"
     assert generation["batch_max_size"] == 8
     routes = {item["id"]: item["generation_entrypoint"] for item in doc["models"]}
